@@ -1,0 +1,2306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RentEase — Tables & Chairs Rental</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .fade-in { animation: fadeIn 0.25s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .status-badge { font-size:.75rem; font-weight:600; padding:.25rem .625rem; border-radius:9999px; display:inline-block; }
+    header { padding-top: env(safe-area-inset-top, 0px); }
+    footer { padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+    .card-hover { transition: transform 0.15s, box-shadow 0.15s; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .modal-backdrop { background: rgba(15, 23, 42, 0.55); }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="app" class="min-h-screen flex flex-col">
+    <!-- Top Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">R</div>
+          <div>
+            <h1 class="font-bold text-lg leading-tight text-slate-900">RentEase</h1>
+            <p class="text-xs text-slate-500">Tables & Chairs Rental</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="switchMode('client')" id="btn-client" class="px-3 py-1.5 rounded-lg text-sm font-medium transition">Client</button>
+          <button onclick="switchMode('admin')" id="btn-admin" class="px-3 py-1.5 rounded-lg text-sm font-medium transition">Admin</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav id="nav" class="bg-white border-b border-slate-200 overflow-x-auto">
+      <div class="max-w-7xl mx-auto px-4 flex gap-1 py-2 text-sm font-medium" id="nav-links"></div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-6" id="main-content"></main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+      RentEase Prototype • Data saved in your browser (localStorage) • Single-file demo
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-4 right-4 z-50 hidden"></div>
+
+  <!-- Generic Modal -->
+  <div id="modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4 modal-backdrop">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto" id="modal-content"></div>
+  </div>
+
+  <script>
+    // ===================== DATA & STATE =====================
+    const DEFAULT_ITEMS = [];
+    const DEFAULT_RESERVATIONS = [];
+
+    let state = {
+      mode: 'client',
+      view: 'home',
+      items: [],
+      reservations: [],
+      cart: [],
+      gcashQR: null,          // base64 image of admin GCash QR
+      feesByCategory: {},      // categories created only in Settings
+      downPaymentPercent: 50, // % of total required as down payment via GCash
+      depositPercent: 50,     // refundable security deposit, % of rental subtotal
+      deliveryFee: 200,       // flat delivery fee in pesos
+      adminPin: '',           // optional PIN to open Admin
+      adminUnlocked: false,
+      messages: [],           // messaging between client & admin
+      currentUser: { name: "Guest Customer", role: "customer" }
+    };
+
+    // ===================== HELPERS =====================
+    function loadData() {
+      try { loadDataRaw(); } catch (err) { console.warn("Could not read saved data", err); }
+    }
+    function loadDataRaw() {
+      // Start completely empty — user will input all data
+      // Clear any previous demo data from localStorage
+      const hasCleanFlag = localStorage.getItem('rentease_clean_v3');
+      if (!hasCleanFlag) {
+        localStorage.removeItem('rentease_items');
+        localStorage.removeItem('rentease_reservations');
+        localStorage.removeItem('rentease_cart');
+        localStorage.removeItem('rentease_gcash_qr');
+        localStorage.removeItem('rentease_fees');
+        localStorage.removeItem('rentease_messages');
+        localStorage.removeItem('rentease_clean_v2');
+        localStorage.setItem('rentease_clean_v3', '1');
+      }
+
+      const savedItems = localStorage.getItem('rentease_items');
+      const savedRes = localStorage.getItem('rentease_reservations');
+      const savedCart = localStorage.getItem('rentease_cart');
+      const savedQR = localStorage.getItem('rentease_gcash_qr');
+      const savedFees = localStorage.getItem('rentease_fees');
+      const savedMsgs = localStorage.getItem('rentease_messages');
+      state.items = savedItems ? JSON.parse(savedItems) : [];
+      state.reservations = savedRes ? JSON.parse(savedRes) : [];
+      state.cart = savedCart ? JSON.parse(savedCart) : [];
+      state.gcashQR = savedQR || null;
+      state.messages = savedMsgs ? JSON.parse(savedMsgs) : [];
+      if (savedFees) {
+        const fees = JSON.parse(savedFees);
+        state.downPaymentPercent = fees.downPaymentPercent ?? 50;
+        state.depositPercent = fees.depositPercent ?? 50;
+        state.deliveryFee = fees.deliveryFee ?? 200;
+        state.adminPin = fees.adminPin || '';
+        if (fees.feesByCategory && typeof fees.feesByCategory === 'object') {
+          state.feesByCategory = fees.feesByCategory;
+        } else {
+          state.feesByCategory = {};
+        }
+      }
+    }
+
+    function saveData() {
+      try { saveDataRaw(); } catch (err) { toast("Could not save. Storage is full or blocked. Try smaller photos.", "error"); }
+      scheduleSync();
+    }
+    function saveDataRaw() {
+      localStorage.setItem('rentease_items', JSON.stringify(state.items));
+      localStorage.setItem('rentease_reservations', JSON.stringify(state.reservations));
+      localStorage.setItem('rentease_cart', JSON.stringify(state.cart));
+      localStorage.setItem('rentease_messages', JSON.stringify(state.messages));
+      localStorage.setItem('rentease_fees', JSON.stringify({
+        feesByCategory: state.feesByCategory,
+        downPaymentPercent: state.downPaymentPercent,
+        depositPercent: state.depositPercent,
+        deliveryFee: state.deliveryFee,
+        adminPin: state.adminPin
+      }));
+      if (state.gcashQR) {
+        localStorage.setItem('rentease_gcash_qr', state.gcashQR);
+      } else {
+        localStorage.removeItem('rentease_gcash_qr');
+      }
+    }
+
+    function getCategoryFees(category) {
+      const cat = category || 'Other';
+      return state.feesByCategory[cat] || { damage: 200, missing: 500 };
+    }
+
+    function ensureCategory(cat) {
+      const name = (cat || '').trim();
+      if (!name) return 'Other';
+      if (!state.feesByCategory[name]) {
+        state.feesByCategory[name] = { damage: 200, missing: 500 };
+      }
+      return name;
+    }
+
+    function getAllCategories() {
+      // Categories come only from Settings (feesByCategory keys)
+      return Object.keys(state.feesByCategory || {}).sort();
+    }
+
+    function money(n) { return '₱' + Number(n).toLocaleString('en-PH'); }
+
+    function toast(msg, type = 'success') {
+      const el = document.getElementById('toast');
+      const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
+      el.className = `fixed bottom-4 right-4 z-50 px-4 py-3 rounded-lg text-white text-sm font-medium shadow-lg ${colors[type] || colors.success}`;
+      el.textContent = msg;
+      el.style.bottom = 'calc(1rem + env(safe-area-inset-bottom, 0px))';
+      el.classList.remove('hidden');
+      setTimeout(() => el.classList.add('hidden'), 2800);
+    }
+
+    function statusBadge(status) {
+      const map = {
+        'Pending': 'bg-amber-100 text-amber-800',
+        'Confirmed': 'bg-blue-100 text-blue-800',
+        'Preparing': 'bg-indigo-100 text-indigo-800',
+        'Ongoing': 'bg-purple-100 text-purple-800',
+        'Completed': 'bg-emerald-100 text-emerald-800',
+        'Cancelled': 'bg-slate-100 text-slate-600',
+        'Overdue': 'bg-red-100 text-red-800',
+        'Paid': 'bg-emerald-100 text-emerald-800',
+        'Partial': 'bg-amber-100 text-amber-800',
+        'Unpaid': 'bg-red-100 text-red-800',
+        'Payment Submitted': 'bg-sky-100 text-sky-800',
+        'Refunded': 'bg-slate-100 text-slate-600'
+      };
+      return `<span class="status-badge ${map[status] || 'bg-slate-100 text-slate-600'}">${status}</span>`;
+    }
+
+    function generateId() {
+      const num = 10000 + Math.floor(Math.random() * 90000);
+      return `REN-2026-${num}`;
+    }
+
+    // Modal helpers
+    function openModal(html) {
+      document.getElementById('modal-content').innerHTML = html;
+      const modal = document.getElementById('modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+
+    // ===================== NAVIGATION =====================
+    function removePin() {
+      state.adminPin = '';
+      saveData();
+      toast('Admin PIN removed');
+      render();
+    }
+
+    function checkPin(e) {
+      e.preventDefault();
+      if (e.target.pin.value === state.adminPin) {
+        state.adminUnlocked = true;
+        closeModal();
+        switchMode('admin');
+      } else {
+        toast('Wrong PIN', 'error');
+      }
+    }
+
+    function switchMode(mode) {
+      if (mode === 'admin' && !isAdminCloud()) {
+        openLoginModal();
+        return;
+      }
+      state.mode = mode;
+      state.view = mode === 'client' ? 'home' : 'dashboard';
+      render();
+    }
+
+    function setView(view) {
+      state.view = view;
+      render();
+    }
+
+    function renderNav() {
+      const unreadClient = state.messages.filter(m => m.to === 'client' && !m.read).length;
+      const unreadAdmin = state.messages.filter(m => m.to === 'admin' && !m.read).length;
+      const clientLinks = [
+        { id: 'home', label: 'Home', icon: 'fa-home' },
+        { id: 'catalog', label: 'Catalog', icon: 'fa-chair' },
+        { id: 'cart', label: 'Cart', icon: 'fa-shopping-cart', badge: state.cart.length },
+        { id: 'bookings', label: 'My Bookings', icon: 'fa-calendar-check' },
+        { id: 'messages', label: 'Messages', icon: 'fa-comments', badge: unreadClient }
+      ];
+      const adminLinks = [
+        { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-pie' },
+        { id: 'inventory', label: 'Inventory', icon: 'fa-boxes-stacked' },
+        { id: 'reservations', label: 'Reservations', icon: 'fa-clipboard-list' },
+        { id: 'returns', label: 'Returns', icon: 'fa-undo' },
+        { id: 'messages', label: 'Messages', icon: 'fa-comments', badge: unreadAdmin },
+        { id: 'reports', label: 'Reports', icon: 'fa-chart-bar' },
+        { id: 'settings', label: 'Settings', icon: 'fa-cog' }
+      ];
+      const links = state.mode === 'client' ? clientLinks : adminLinks;
+      document.getElementById('nav-links').innerHTML = links.map(l => `
+        <button onclick="setView('${l.id}')" class="flex items-center gap-2 px-3 py-2 rounded-lg whitespace-nowrap transition ${state.view === l.id ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100'}">
+          <i class="fas ${l.icon}"></i> ${l.label}
+          ${l.badge ? `<span class="bg-emerald-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">${l.badge}</span>` : ''}
+        </button>
+      `).join('');
+
+      document.getElementById('btn-client').className = `px-3 py-1.5 rounded-lg text-sm font-medium transition ${state.mode === 'client' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`;
+      document.getElementById('btn-admin').className = `px-3 py-1.5 rounded-lg text-sm font-medium transition ${state.mode === 'admin' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`;
+    }
+
+    // ===================== CLIENT VIEWS =====================
+    function renderHome() {
+      return `
+        <div class="fade-in space-y-8">
+          <section class="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-2xl p-8 text-white">
+            <h2 class="text-3xl font-bold mb-2">Rent Tables & Chairs Easily</h2>
+            <p class="text-emerald-100 mb-6 max-w-xl">Quality tables and chairs for birthdays, weddings, meetings, and events. Check availability, book online, and track your reservation.</p>
+            <div class="flex flex-wrap gap-3">
+              <button onclick="setView('catalog')" class="bg-white text-emerald-700 font-semibold px-5 py-2.5 rounded-lg hover:bg-emerald-50 transition">Browse Catalog</button>
+              <button onclick="setView('bookings')" class="bg-emerald-500/30 text-white font-semibold px-5 py-2.5 rounded-lg border border-white/30 hover:bg-emerald-500/40 transition">My Bookings</button>
+            </div>
+          </section>
+
+          <section>
+            <h3 class="text-lg font-semibold mb-4">Popular Items</h3>
+            ${state.items.length === 0 ? `
+              <div class="bg-white rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-400">
+                <p class="text-sm">No items available yet. Admin needs to add inventory first.</p>
+              </div>
+            ` : `
+              <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                ${state.items.slice(0,6).map(item => `
+                  <div class="bg-white rounded-xl border border-slate-200 p-4 text-center card-hover cursor-pointer" onclick="setView('catalog')">
+                    <div class="mb-2 flex justify-center">${renderItemThumb(item, 'w-16 h-16')}</div>
+                    <div class="font-medium text-sm">${item.name}</div>
+                    <div class="text-emerald-600 font-semibold text-sm mt-1">${money(item.price)}/day</div>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </section>
+
+          <section class="grid md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center mb-3"><i class="fas fa-calendar-check"></i></div>
+              <h4 class="font-semibold mb-1">Easy Booking</h4>
+              <p class="text-sm text-slate-500">Select items, pick dates, and reserve in minutes.</p>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center mb-3"><i class="fas fa-qrcode"></i></div>
+              <h4 class="font-semibold mb-1">Pay via GCash</h4>
+              <p class="text-sm text-slate-500">Scan the QR code and upload your receipt easily.</p>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="w-10 h-10 bg-amber-100 text-amber-600 rounded-lg flex items-center justify-center mb-3"><i class="fas fa-shield-alt"></i></div>
+              <h4 class="font-semibold mb-1">Secure Deposit</h4>
+              <p class="text-sm text-slate-500">Refundable deposit protects both parties.</p>
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
+    function renderCatalog() {
+      return `
+        <div class="fade-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-bold">Catalog</h2>
+            <span class="text-sm text-slate-500">${state.items.length} items</span>
+          </div>
+          ${state.items.length === 0 ? `
+            <div class="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center text-slate-400">
+              <i class="fas fa-box-open text-4xl mb-3"></i>
+              <p class="font-medium">Catalog is empty</p>
+              <p class="text-sm">Switch to Admin → Inventory to add tables and chairs.</p>
+            </div>
+          ` : `
+          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            ${state.items.map(item => `
+              <div class="bg-white rounded-xl border border-slate-200 overflow-hidden card-hover">
+                <div class="bg-slate-50 h-40 flex items-center justify-center overflow-hidden">
+                  ${renderItemHero(item)}
+                </div>
+                <div class="p-4">
+                  <div class="flex justify-between items-start mb-1">
+                    <h3 class="font-semibold">${item.name}</h3>
+                    <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">${item.category}</span>
+                  </div>
+                  <p class="text-sm text-slate-500 mb-3">${item.desc || ''}</p>
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="text-emerald-600 font-bold">${money(item.price)}<span class="text-slate-400 font-normal text-sm">/day</span></span>
+                    <span class="text-xs text-slate-500">${item.available} available</span>
+                  </div>
+                  <div class="flex gap-2">
+                    <input type="number" id="qty-${item.id}" min="1" max="${item.available}" value="1" class="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm">
+                    <button onclick="addToCart(${item.id})" class="flex-1 bg-emerald-600 text-white text-sm font-medium py-1.5 rounded-lg hover:bg-emerald-700 transition">Add to Cart</button>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          `}
+        </div>
+      `;
+    }
+
+    function addToCart(itemId) {
+      const item = state.items.find(i => i.id === itemId);
+      if (!item) return;
+      const qtyInput = document.getElementById(`qty-${itemId}`);
+      let qty = parseInt(qtyInput?.value || 1);
+      if (isNaN(qty) || qty < 1) {
+        toast('Invalid quantity', 'error');
+        return;
+      }
+      const existing = state.cart.find(c => c.id === itemId);
+      const alreadyInCart = existing ? existing.qty : 0;
+      const canAdd = item.available - alreadyInCart;
+      if (canAdd <= 0) {
+        toast(`All available ${item.name} are already in your cart`, 'error');
+        return;
+      }
+      if (qty > canAdd) {
+        qty = canAdd;
+        toast(`Only ${canAdd} more available — added ${canAdd}`, 'info');
+      }
+      if (existing) {
+        existing.qty += qty;
+      } else {
+        state.cart.push({ id: item.id, name: item.name, price: item.price, qty, image: item.image });
+      }
+      saveData();
+      toast(`${item.name} added to cart`);
+      render();
+    }
+
+    function updateCartQty(itemId, delta) {
+      const cartItem = state.cart.find(c => c.id === itemId);
+      if (!cartItem) return;
+      const invItem = state.items.find(i => i.id === itemId);
+      const maxAvailable = invItem ? invItem.available : cartItem.qty;
+
+      if (delta > 0 && cartItem.qty >= maxAvailable) {
+        toast(`Only ${maxAvailable} available`, 'error');
+        return;
+      }
+
+      cartItem.qty += delta;
+      if (cartItem.qty <= 0) {
+        state.cart = state.cart.filter(c => c.id !== itemId);
+      } else if (cartItem.qty > maxAvailable) {
+        cartItem.qty = maxAvailable;
+      }
+      saveData();
+      render();
+    }
+
+    function setCartQty(itemId, value) {
+      const cartItem = state.cart.find(c => c.id === itemId);
+      if (!cartItem) return;
+      const invItem = state.items.find(i => i.id === itemId);
+      const maxAvailable = invItem ? invItem.available : cartItem.qty;
+
+      let qty = parseInt(value, 10);
+      if (isNaN(qty) || qty < 1) {
+        // keep current if invalid while typing; remove only on blur via setCartQtyBlur
+        return;
+      }
+      if (qty > maxAvailable) {
+        qty = maxAvailable;
+        toast(`Only ${maxAvailable} available`, 'error');
+      }
+      cartItem.qty = qty;
+      saveData();
+      render();
+    }
+
+    function setCartQtyBlur(itemId, value) {
+      const cartItem = state.cart.find(c => c.id === itemId);
+      if (!cartItem) return;
+      let qty = parseInt(value, 10);
+      if (isNaN(qty) || qty < 1) {
+        state.cart = state.cart.filter(c => c.id !== itemId);
+        saveData();
+        render();
+        return;
+      }
+      setCartQty(itemId, qty);
+    }
+
+    function removeFromCart(itemId) {
+      state.cart = state.cart.filter(c => c.id !== itemId);
+      saveData();
+      render();
+    }
+
+    function renderCart() {
+      const subtotal = state.cart.reduce((s, c) => s + c.price * c.qty, 0);
+      const deposit = Math.round(subtotal * state.depositPercent / 100);
+      const deliveryFee = subtotal > 0 ? state.deliveryFee : 0;
+      const total = subtotal + deposit + deliveryFee;
+
+      if (state.cart.length === 0) {
+        return `
+          <div class="fade-in text-center py-16">
+            <div class="text-5xl mb-4">🛒</div>
+            <h2 class="text-xl font-semibold mb-2">Your cart is empty</h2>
+            <p class="text-slate-500 mb-6">Browse the catalog and add items to get started.</p>
+            <button onclick="setView('catalog')" class="bg-emerald-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-emerald-700">Go to Catalog</button>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="fade-in grid lg:grid-cols-3 gap-6">
+          <div class="lg:col-span-2 space-y-4">
+            <h2 class="text-xl font-bold">Rental Cart</h2>
+            ${state.cart.map(c => {
+              const inv = state.items.find(i => i.id === c.id);
+              const maxAvail = inv ? inv.available : c.qty;
+              const atMax = c.qty >= maxAvail;
+              return `
+              <div class="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-4">
+                ${renderItemThumb(c, 'w-14 h-14')}
+                <div class="flex-1">
+                  <div class="font-medium">${c.name}</div>
+                  <div class="text-sm text-slate-500">${money(c.price)} × ${c.qty} <span class="text-slate-400">(max ${maxAvail})</span></div>
+                </div>
+                <div class="flex items-center gap-1">
+                  <button type="button" onclick="updateCartQty(${c.id}, -1)" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200">−</button>
+                  <input type="number" min="1" max="${maxAvail}" value="${c.qty}"
+                    class="w-14 border border-slate-300 rounded-lg text-center text-sm py-1.5 font-medium"
+                    onchange="setCartQty(${c.id}, this.value)"
+                    onblur="setCartQtyBlur(${c.id}, this.value)"
+                    onclick="this.select()">
+                  <button type="button" onclick="updateCartQty(${c.id}, 1)" class="w-8 h-8 rounded-lg ${atMax ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-slate-100 hover:bg-slate-200'}" ${atMax ? 'disabled' : ''}>+</button>
+                </div>
+                <div class="font-semibold w-20 text-right">${money(c.price * c.qty)}</div>
+                <button onclick="removeFromCart(${c.id})" class="text-red-500 hover:text-red-700"><i class="fas fa-trash-alt"></i></button>
+              </div>
+            `}).join('')}
+          </div>
+
+          <div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5 sticky top-24">
+              <h3 class="font-semibold mb-4">Booking Details</h3>
+              <form onsubmit="submitBooking(event)" class="space-y-3">
+                <div>
+                  <label class="text-xs font-medium text-slate-500">Full Name</label>
+                  <input required name="customer" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Juan Dela Cruz">
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-500">Contact Number</label>
+                  <input required name="contact" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="09xxxxxxxxx">
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-500">Event / Purpose</label>
+                  <input name="event" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Birthday Party">
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-500">Location / Address</label>
+                  <input name="location" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="City, Barangay">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-xs font-medium text-slate-500">Rental Date</label>
+                    <input required type="date" name="rentalDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+                  </div>
+                  <div>
+                    <label class="text-xs font-medium text-slate-500">Return Date</label>
+                    <input required type="date" name="returnDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-500">Notes (optional)</label>
+                  <textarea name="notes" rows="2" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Special instructions..."></textarea>
+                </div>
+
+                <div class="border-t border-slate-100 pt-3 space-y-1 text-sm">
+                  <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span>${money(subtotal)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-500">Delivery Fee</span><span>${money(deliveryFee)}</span></div>
+                  <div class="flex justify-between"><span class="text-slate-500">Security Deposit</span><span>${money(deposit)}</span></div>
+                  <div class="flex justify-between font-bold text-base pt-2 border-t border-slate-100"><span>Total</span><span class="text-emerald-600">${money(total)}</span></div>
+                </div>
+
+                <button type="submit" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700 transition mt-2">Submit Reservation</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function submitBooking(e) {
+      e.preventDefault();
+      const form = e.target;
+      const subtotal = state.cart.reduce((s, c) => s + c.price * c.qty, 0);
+      const deposit = Math.round(subtotal * state.depositPercent / 100);
+      const deliveryFee = state.deliveryFee;
+      const total = subtotal + deposit + deliveryFee;
+
+      const reservation = {
+        id: generateId(),
+        customer: clean(form.customer.value),
+        contact: clean(form.contact.value),
+        event: clean(form.event.value) || 'Event',
+        location: clean(form.location.value),
+        rentalDate: form.rentalDate.value,
+        returnDate: form.returnDate.value,
+        items: state.cart.map(c => ({ id: c.id, qty: c.qty, price: c.price })),
+        subtotal, deliveryFee, deposit, total,
+        paid: 0,
+        status: 'Pending',
+        paymentStatus: 'Unpaid',
+        paymentMethod: '',
+        created: new Date().toISOString().slice(0,10),
+        notes: clean(form.notes.value),
+        proofOfPayment: null
+      };
+
+      for (const c of state.cart) {
+        const item = state.items.find(i => i.id === c.id);
+        if (c.qty > item.available) {
+          toast(`Not enough ${item.name} available`, 'error');
+          return;
+        }
+      }
+
+      state.cart.forEach(c => {
+        const item = state.items.find(i => i.id === c.id);
+        item.available -= c.qty;
+        item.rented += c.qty;
+      });
+
+      state.reservations.unshift(reservation);
+      state.cart = [];
+      saveData();
+      toast('Reservation submitted! ID: ' + reservation.id);
+      setView('bookings');
+    }
+
+    function renderBookings() {
+      const list = state.reservations;
+      return `
+        <div class="fade-in">
+          <h2 class="text-xl font-bold mb-6">My Bookings</h2>
+          ${list.length === 0 ? `
+            <div class="text-center py-12 text-slate-500">No bookings yet.</div>
+          ` : `
+            <div class="space-y-4">
+              ${list.map(r => `
+                <div class="bg-white rounded-xl border border-slate-200 p-5">
+                  <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+                    <div>
+                      <div class="font-semibold text-lg">${r.id}</div>
+                      <div class="text-sm text-slate-500">${r.event} • ${r.rentalDate} → ${r.returnDate}</div>
+                    </div>
+                    <div class="flex gap-2 flex-wrap">
+                      ${statusBadge(r.status)}
+                      ${statusBadge(r.paymentStatus)}
+                    </div>
+                  </div>
+                  <div class="grid sm:grid-cols-2 gap-2 text-sm mb-3">
+                    <div><span class="text-slate-500">Customer:</span> ${r.customer}</div>
+                    <div><span class="text-slate-500">Contact:</span> ${r.contact}</div>
+                    <div><span class="text-slate-500">Location:</span> ${r.location || '—'}</div>
+                    <div><span class="text-slate-500">Total:</span> <span class="font-semibold">${money(r.total)}</span> (Paid: ${money(r.paid)})</div>
+                  </div>
+                  <div class="text-sm text-slate-600 border-t border-slate-100 pt-3 mb-4">
+                    ${r.items.map(i => {
+                      const item = state.items.find(x => x.id === i.id);
+                      return `${item?.name || 'Item'} × ${i.qty}`;
+                    }).join(' • ')}
+                  </div>
+
+                  <!-- Payment Actions -->
+                  <div class="flex flex-wrap gap-2">
+                    ${['Unpaid', 'Partial'].includes(r.paymentStatus) ? `
+                      <button onclick="showGCashQR('${r.id}')" class="text-sm bg-sky-600 text-white px-4 py-2 rounded-lg hover:bg-sky-700 flex items-center gap-2">
+                        <i class="fas fa-qrcode"></i> Pay Down Payment
+                      </button>
+                    ` : ''}
+                    ${r.paymentStatus === 'Payment Submitted' ? `
+                      <span class="text-sm text-sky-700 bg-sky-50 px-3 py-2 rounded-lg flex items-center gap-2">
+                        <i class="fas fa-clock"></i> Waiting for admin to confirm payment
+                      </span>
+                    ` : ''}
+                    ${r.proofOfPayment ? `
+                      <button onclick="viewProof('${r.id}')" class="text-sm bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
+                        <i class="fas fa-image"></i> View My Proof
+                      </button>
+                    ` : ''}
+                    <button onclick="openMessageModal('${r.id}')" class="text-sm bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
+                      <i class="fas fa-comment"></i> Message Admin
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // ========== GCASH PAYMENT FLOW (CLIENT) — DOWN PAYMENT ONLY ==========
+    function getDownPaymentAmount(r) {
+      const pct = state.downPaymentPercent || 50;
+      return Math.round(r.total * (pct / 100));
+    }
+
+    function showGCashQR(reservationId) {
+      if (!state.gcashQR) {
+        openModal(`
+          <div class="p-6 text-center">
+            <div class="text-4xl mb-3">⚠️</div>
+            <h3 class="font-bold text-lg mb-2">GCash QR Not Available</h3>
+            <p class="text-slate-500 text-sm mb-4">The admin has not uploaded a GCash QR code yet. Please message the admin.</p>
+            <button onclick="closeModal(); setView('messages')" class="bg-sky-600 text-white px-4 py-2 rounded-lg text-sm font-medium mr-2">Message Admin</button>
+            <button onclick="closeModal()" class="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">Close</button>
+          </div>
+        `);
+        return;
+      }
+
+      const r = state.reservations.find(x => x.id === reservationId);
+      const dpAmount = getDownPaymentAmount(r);
+      const remainingAfterDp = r.total - dpAmount;
+      const pct = state.downPaymentPercent || 50;
+
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-lg">Pay Down Payment via GCash</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <p class="text-sm text-slate-500 mb-1">Reservation: <strong>${r.id}</strong></p>
+          
+          <div class="bg-slate-50 rounded-lg p-3 mb-4 text-sm space-y-1">
+            <div class="flex justify-between"><span class="text-slate-500">Total Amount</span><span>${money(r.total)}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Down Payment (${pct}%)</span><span class="font-bold text-emerald-600 text-lg">${money(dpAmount)}</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Balance (pay later)</span><span>${money(remainingAfterDp)}</span></div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">
+            Online GCash is for <strong>down payment only</strong>. To pay the full amount via GCash, please message the admin.
+          </div>
+          
+          <div class="bg-slate-50 rounded-xl p-4 flex justify-center mb-4">
+            <img src="${state.gcashQR}" alt="GCash QR Code" class="max-w-full max-h-64 rounded-lg border border-slate-200">
+          </div>
+          
+          <ol class="text-sm text-slate-600 space-y-2 mb-5 list-decimal list-inside">
+            <li>Open your GCash app</li>
+            <li>Tap <strong>Scan QR</strong></li>
+            <li>Scan the code above</li>
+            <li>Enter the down payment: <strong>${money(dpAmount)}</strong></li>
+            <li>Complete the payment & take a screenshot</li>
+          </ol>
+
+          <button onclick="showUploadProof('${reservationId}')" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700 mb-2">
+            I've Paid DP — Upload Proof
+          </button>
+          <button onclick="closeModal(); openMessageModal('${reservationId}')" class="w-full bg-sky-50 text-sky-700 font-medium py-2.5 rounded-lg hover:bg-sky-100 text-sm">
+            Want to pay full amount? Message Admin
+          </button>
+        </div>
+      `);
+    }
+
+    function showUploadProof(reservationId) {
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-lg">Upload Proof of Payment</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <p class="text-sm text-slate-500 mb-4">Upload a clear screenshot of your GCash receipt / transaction confirmation.</p>
+          
+          <div class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center mb-4">
+            <input type="file" id="proof-file" accept="image/*" class="hidden" onchange="previewProof(event)">
+            <label for="proof-file" class="cursor-pointer">
+              <div id="proof-preview" class="text-slate-400">
+                <i class="fas fa-cloud-upload-alt text-3xl mb-2"></i>
+                <p class="text-sm">Tap to select image</p>
+              </div>
+            </label>
+          </div>
+
+          <button onclick="submitProof('${reservationId}')" id="btn-submit-proof" disabled class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            Submit Proof
+          </button>
+        </div>
+      `);
+    }
+
+    let tempProofBase64 = null;
+
+    function previewProof(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024) {
+        toast('Image too large (max 3MB)', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        tempProofBase64 = ev.target.result;
+        document.getElementById('proof-preview').innerHTML = `<img src="${tempProofBase64}" class="max-h-48 mx-auto rounded-lg">`;
+        document.getElementById('btn-submit-proof').disabled = false;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function submitProof(reservationId) {
+      if (!tempProofBase64) {
+        toast('Please select an image first', 'error');
+        return;
+      }
+      const r = state.reservations.find(x => x.id === reservationId);
+      if (!r) return;
+
+      r.proofOfPayment = tempProofBase64;
+      r.paymentStatus = 'Payment Submitted';
+      r.paymentMethod = 'GCash';
+      r.paymentSubmittedAt = new Date().toISOString();
+      r.expectedDpAmount = getDownPaymentAmount(r); // store expected DP for admin
+      tempProofBase64 = null;
+      saveData();
+      closeModal();
+      toast('Down payment proof uploaded! Waiting for admin confirmation.');
+      render();
+    }
+
+    function viewProof(reservationId) {
+      const r = state.reservations.find(x => x.id === reservationId);
+      if (!r || !r.proofOfPayment) return;
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-lg">Proof of Payment</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <p class="text-sm text-slate-500 mb-3">${r.id} — ${r.customer}</p>
+          <img src="${r.proofOfPayment}" class="w-full rounded-lg border border-slate-200" alt="Proof of Payment">
+        </div>
+      `);
+    }
+
+    // ===================== ADMIN VIEWS =====================
+    function renderDashboard() {
+      const totalRevenue = state.reservations.reduce((s, r) => s + (r.paid || 0), 0);
+      const active = state.reservations.filter(r => ['Confirmed','Preparing','Ongoing'].includes(r.status)).length;
+      const pending = state.reservations.filter(r => r.status === 'Pending').length;
+      const awaitingPayment = state.reservations.filter(r => r.paymentStatus === 'Payment Submitted').length;
+      const availableItems = state.items.reduce((s, i) => s + i.available, 0);
+      const totalItems = state.items.reduce((s, i) => s + i.total, 0);
+
+      return `
+        <div class="fade-in space-y-6">
+          <h2 class="text-xl font-bold">Admin Dashboard</h2>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500 mb-1">Total Revenue</div>
+              <div class="text-2xl font-bold text-emerald-600">${money(totalRevenue)}</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500 mb-1">Active Rentals</div>
+              <div class="text-2xl font-bold text-blue-600">${active}</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500 mb-1">Pending</div>
+              <div class="text-2xl font-bold text-amber-600">${pending}</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500 mb-1">Awaiting Payment Review</div>
+              <div class="text-2xl font-bold text-sky-600">${awaitingPayment}</div>
+            </div>
+          </div>
+
+          <div class="grid lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <h3 class="font-semibold mb-4">Recent Reservations</h3>
+              <div class="space-y-3">
+                ${state.reservations.slice(0,5).map(r => `
+                  <div class="flex items-center justify-between text-sm">
+                    <div>
+                      <div class="font-medium">${r.id}</div>
+                      <div class="text-slate-500">${r.customer}</div>
+                    </div>
+                    <div class="text-right">
+                      ${statusBadge(r.paymentStatus)}
+                      <div class="text-slate-500 mt-1">${money(r.total)}</div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <h3 class="font-semibold mb-4">Inventory Snapshot</h3>
+              <div class="space-y-3">
+                ${state.items.map(i => `
+                  <div>
+                    <div class="flex justify-between text-sm mb-1">
+                      <span>${i.name}</span>
+                      <span class="text-slate-500">${i.available} / ${i.total}</span>
+                    </div>
+                    <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div class="h-full bg-emerald-500 rounded-full" style="width:${(i.available/i.total*100)}%"></div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderInventory() {
+      return `
+        <div class="fade-in space-y-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold">Inventory Management</h2>
+            <button onclick="resetAllData()" class="text-sm text-red-500 hover:text-red-700">Clear All Data</button>
+          </div>
+
+          <!-- Add New Item Form -->
+          <div class="bg-white rounded-xl border border-slate-200 p-5">
+            <h3 class="font-semibold mb-4">Add New Item</h3>
+            <form onsubmit="addNewItem(event)" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <label class="text-xs font-medium text-slate-500">Item Name *</label>
+                <input required name="name" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="e.g. Plastic Chair">
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-500">Category *</label>
+                ${getAllCategories().length === 0 ? `
+                  <p class="text-xs text-amber-600 mt-1">No categories yet. Add them in <strong>Settings</strong> first.</p>
+                  <select name="category" required disabled class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1 bg-slate-50">
+                    <option value="">Add categories in Settings</option>
+                  </select>
+                ` : `
+                  <select name="category" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+                    <option value="">Select category</option>
+                    ${getAllCategories().map(c => `<option value="${c}">${c}</option>`).join('')}
+                  </select>
+                `}
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-500">Rental Price (₱) *</label>
+                <input required type="number" name="price" min="1" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="10">
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-500">Quantity *</label>
+                <input required type="number" name="qty" min="1" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="100">
+              </div>
+              <div>
+                <label class="text-xs font-medium text-slate-500">Description</label>
+                <input name="desc" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Optional description">
+              </div>
+              <div class="sm:col-span-2 lg:col-span-3">
+                <label class="text-xs font-medium text-slate-500">Item Photo</label>
+                <div class="mt-1 flex items-start gap-4">
+                  <div id="new-item-photo-preview" class="w-24 h-24 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-slate-400 text-xs overflow-hidden">
+                    No photo
+                  </div>
+                  <div>
+                    <input type="file" id="new-item-photo" accept="image/*" class="text-sm" onchange="previewNewItemPhoto(event)">
+                    <p class="text-xs text-slate-400 mt-1">JPG or PNG, max 3MB. Optional but recommended.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="sm:col-span-2 lg:col-span-3">
+                <button type="submit" class="bg-emerald-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-emerald-700">
+                  <i class="fas fa-plus mr-1"></i> Add Item
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Items Table -->
+          <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            ${state.items.length === 0 ? `
+              <div class="p-10 text-center text-slate-400">
+                <i class="fas fa-box-open text-4xl mb-3"></i>
+                <p class="font-medium">No items yet</p>
+                <p class="text-sm">Add your first table or chair using the form above.</p>
+              </div>
+            ` : `
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead class="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th class="text-left px-4 py-3 font-medium">Item</th>
+                      <th class="text-right px-4 py-3 font-medium">Price</th>
+                      <th class="text-right px-4 py-3 font-medium">Total</th>
+                      <th class="text-right px-4 py-3 font-medium">Available</th>
+                      <th class="text-right px-4 py-3 font-medium">Rented</th>
+                      <th class="text-right px-4 py-3 font-medium">Damaged</th>
+                      <th class="text-center px-4 py-3 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100">
+                    ${state.items.map(i => `
+                      <tr>
+                        <td class="px-4 py-3">
+                          <div class="flex items-center gap-3">
+                            ${renderItemThumb(i, 'w-12 h-12')}
+                            <div>
+                              <div class="font-medium">${i.name}</div>
+                              <div class="text-xs text-slate-500">${i.category}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="px-4 py-3 text-right">${money(i.price)}</td>
+                        <td class="px-4 py-3 text-right">${i.total}</td>
+                        <td class="px-4 py-3 text-right font-medium text-emerald-600">${i.available}</td>
+                        <td class="px-4 py-3 text-right text-blue-600">${i.rented}</td>
+                        <td class="px-4 py-3 text-right text-red-600">${i.damaged}</td>
+                        <td class="px-4 py-3 text-center whitespace-nowrap">
+                          <div class="flex items-center justify-center gap-1 mb-1">
+                            <button onclick="adjustStock(${i.id}, -1)" class="text-xs bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded">−</button>
+                            <input type="number" id="stock-input-${i.id}" value="1" min="1" class="w-12 border border-slate-300 rounded text-center text-xs py-1">
+                            <button onclick="adjustStock(${i.id}, 1)" class="text-xs bg-slate-100 hover:bg-slate-200 w-7 h-7 rounded">+</button>
+                          </div>
+                          <div class="flex items-center justify-center gap-1">
+                            <button onclick="openEditItem(${i.id})" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded">Edit</button>
+                            <button onclick="deleteItem(${i.id})" class="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded">Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    // Temporary storage for new item photo
+    let tempNewItemPhoto = null;
+
+    function previewNewItemPhoto(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024) {
+        toast('Image too large (max 3MB)', 'error');
+        e.target.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        tempNewItemPhoto = ev.target.result;
+        const preview = document.getElementById('new-item-photo-preview');
+        if (preview) {
+          preview.innerHTML = `<img src="${tempNewItemPhoto}" class="w-full h-full object-cover">`;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function renderItemThumb(item, sizeClass = 'w-12 h-12') {
+      if (item.image && item.image.startsWith('data:image')) {
+        return `<img src="${item.image}" alt="${item.name}" class="${sizeClass} rounded-lg object-cover border border-slate-200">`;
+      }
+      // fallback for old emoji or missing photo
+      return `<div class="${sizeClass} rounded-lg bg-slate-100 flex items-center justify-center text-xl border border-slate-200">${item.image || '📦'}</div>`;
+    }
+
+    function renderItemHero(item) {
+      if (item.image && item.image.startsWith('data:image')) {
+        return `<img src="${item.image}" alt="${item.name}" class="w-full h-full object-cover">`;
+      }
+      return `<div class="text-5xl">${item.image || '📦'}</div>`;
+    }
+
+    function addNewItem(e) {
+      e.preventDefault();
+      const form = e.target;
+      const name = clean(form.name.value);
+      const category = cleanKey(form.category?.value);
+      if (!category) {
+        toast('Please select a category. Add categories in Settings first.', 'error');
+        return;
+      }
+      ensureCategory(category);
+      const price = parseFloat(form.price.value);
+      const qty = parseInt(form.qty.value);
+      const desc = clean(form.desc.value);
+      const image = tempNewItemPhoto || '📦';
+
+      if (!name || isNaN(price) || price < 0 || isNaN(qty) || qty < 1) {
+        toast('Please fill in valid name, price, and quantity', 'error');
+        return;
+      }
+
+      const newId = state.items.length > 0 ? Math.max(...state.items.map(i => i.id)) + 1 : 1;
+      state.items.push({
+        id: newId,
+        name,
+        category,
+        price,
+        total: qty,
+        available: qty,
+        rented: 0,
+        damaged: 0,
+        image,
+        desc
+      });
+      saveData();
+      toast(`${name} added (${category})`);
+      tempNewItemPhoto = null;
+      form.reset();
+      const preview = document.getElementById('new-item-photo-preview');
+      if (preview) preview.innerHTML = 'No photo';
+      render();
+    }
+
+    function adjustStock(id, direction) {
+      const item = state.items.find(i => i.id === id);
+      if (!item) return;
+      const input = document.getElementById(`stock-input-${id}`);
+      let amount = parseInt(input?.value || 1);
+      if (isNaN(amount) || amount < 1) amount = 1;
+
+      const delta = direction * amount;
+
+      // Cannot reduce available below 0, and cannot reduce total below currently rented
+      if (delta < 0) {
+        const maxReduce = item.available;
+        if (Math.abs(delta) > maxReduce) {
+          toast(`Can only remove up to ${maxReduce} (available stock)`, 'error');
+          return;
+        }
+      }
+
+      item.total = Math.max(item.rented, item.total + delta);
+      item.available = Math.max(0, item.available + delta);
+      saveData();
+      toast(`${item.name}: ${delta > 0 ? '+' : ''}${delta} → Total ${item.total}, Available ${item.available}`);
+      render();
+    }
+
+    function openEditItem(id) {
+      const item = state.items.find(i => i.id === id);
+      if (!item) return;
+
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-lg">Edit Item</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <form onsubmit="saveEditItem(event, ${id})" class="space-y-3">
+            <div>
+              <label class="text-xs font-medium text-slate-500">Item Name *</label>
+              <input required name="name" value="${item.name.replace(/"/g, '&quot;')}" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500">Category *</label>
+              ${getAllCategories().length === 0 ? `
+                <p class="text-xs text-amber-600 mt-1">No categories. Add them in Settings first.</p>
+                <select name="category" required disabled class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1 bg-slate-50">
+                  <option value="">No categories</option>
+                </select>
+              ` : `
+                <select name="category" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+                  ${getAllCategories().map(c => `<option value="${c}" ${item.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+                </select>
+              `}
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500">Rental Price (₱) *</label>
+              <input required type="number" name="price" min="0" step="1" value="${item.price}" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500">Description</label>
+              <input name="desc" value="${(item.desc || '').replace(/"/g, '&quot;')}" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1">
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500">Change Photo (optional)</label>
+              <div class="mt-1 flex items-center gap-3">
+                ${renderItemThumb(item, 'w-16 h-16')}
+                <input type="file" id="edit-item-photo" accept="image/*" class="text-sm" onchange="previewEditItemPhoto(event)">
+              </div>
+              <div id="edit-item-photo-preview" class="mt-2"></div>
+            </div>
+            <button type="submit" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700 mt-2">
+              Save Changes
+            </button>
+          </form>
+        </div>
+      `);
+    }
+
+    let tempEditItemPhoto = null;
+
+    function previewEditItemPhoto(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024) {
+        toast('Image too large (max 3MB)', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        tempEditItemPhoto = ev.target.result;
+        const preview = document.getElementById('edit-item-photo-preview');
+        if (preview) {
+          preview.innerHTML = `<img src="${tempEditItemPhoto}" class="h-24 rounded-lg border border-slate-200 object-cover">`;
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function saveEditItem(e, id) {
+      e.preventDefault();
+      const item = state.items.find(i => i.id === id);
+      if (!item) return;
+      const form = e.target;
+      const name = clean(form.name.value);
+      const category = cleanKey(form.category?.value);
+      if (!category) {
+        toast('Please select a category', 'error');
+        return;
+      }
+      ensureCategory(category);
+      const price = parseFloat(form.price.value);
+      const desc = clean(form.desc.value);
+
+      if (!name || isNaN(price) || price < 0) {
+        toast('Please enter a valid name and price', 'error');
+        return;
+      }
+
+      item.name = name;
+      item.category = category;
+      item.price = price;
+      item.desc = desc;
+      if (tempEditItemPhoto) {
+        item.image = tempEditItemPhoto;
+        tempEditItemPhoto = null;
+      }
+      saveData();
+      closeModal();
+      toast(`${name} updated`);
+      render();
+    }
+
+    function deleteItem(id) {
+      const item = state.items.find(i => i.id === id);
+      if (!item) return;
+      if (item.rented > 0) {
+        toast('Cannot delete item that is currently rented', 'error');
+        return;
+      }
+      if (!confirm(`Delete "${item.name}" from inventory?`)) return;
+      state.items = state.items.filter(i => i.id !== id);
+      saveData();
+      toast(`${item.name} deleted`);
+      render();
+    }
+
+    function resetAllData() {
+      if (!confirm('This will permanently delete ALL items, reservations, cart, QR, fees, and messages. Continue?')) return;
+      localStorage.removeItem('rentease_items');
+      localStorage.removeItem('rentease_reservations');
+      localStorage.removeItem('rentease_cart');
+      localStorage.removeItem('rentease_gcash_qr');
+      localStorage.removeItem('rentease_fees');
+      localStorage.removeItem('rentease_messages');
+      localStorage.removeItem('rentease_clean_v2');
+      localStorage.removeItem('rentease_clean_v3');
+      state.items = [];
+      state.reservations = [];
+      state.cart = [];
+      state.messages = [];
+      state.gcashQR = null;
+      state.feesByCategory = {};
+      state.downPaymentPercent = 50;
+      state.depositPercent = 50;
+      state.deliveryFee = 200;
+      saveData();
+      toast('All data cleared');
+      render();
+    }
+
+    function renderReservations() {
+      return `
+        <div class="fade-in">
+          <h2 class="text-xl font-bold mb-6">Reservation Management</h2>
+          ${state.reservations.length === 0 ? `
+            <div class="bg-white rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-400">
+              <i class="fas fa-clipboard-list text-4xl mb-3"></i>
+              <p class="font-medium">No reservations yet</p>
+              <p class="text-sm">Reservations created by customers will appear here.</p>
+            </div>
+          ` : `
+          <div class="space-y-4">
+            ${state.reservations.map(r => `
+              <div class="bg-white rounded-xl border border-slate-200 p-5">
+                <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+                  <div>
+                    <div class="font-semibold">${r.id}</div>
+                    <div class="text-sm text-slate-500">${r.customer} • ${r.contact}</div>
+                    <div class="text-sm text-slate-500">${r.event} • ${r.location || 'No location'}</div>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    ${statusBadge(r.status)}
+                    ${statusBadge(r.paymentStatus)}
+                  </div>
+                </div>
+                <div class="text-sm mb-3">
+                  <span class="text-slate-500">Dates:</span> ${r.rentalDate} → ${r.returnDate} &nbsp;|&nbsp;
+                  <span class="text-slate-500">Total:</span> ${money(r.total)} (Paid: ${money(r.paid)})
+                </div>
+                <div class="text-sm text-slate-600 mb-4">
+                  ${r.items.map(i => {
+                    const item = state.items.find(x => x.id === i.id);
+                    return `${item?.name || 'Item'} × ${i.qty}`;
+                  }).join(' • ')}
+                </div>
+
+                <!-- Proof of Payment Preview -->
+                ${r.proofOfPayment ? `
+                  <div class="mb-4 p-3 bg-sky-50 rounded-lg border border-sky-100">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium text-sky-800"><i class="fas fa-receipt mr-1"></i> Proof of Payment Uploaded</span>
+                      <button onclick="viewProof('${r.id}')" class="text-xs text-sky-600 hover:underline">View Full</button>
+                    </div>
+                    <img src="${r.proofOfPayment}" class="h-20 rounded border border-sky-200 object-cover cursor-pointer" onclick="viewProof('${r.id}')">
+                  </div>
+                ` : ''}
+
+                <div class="flex flex-wrap gap-2">
+                  ${r.status === 'Pending' ? `<button onclick="updateResStatus('${r.id}','Confirmed')" class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">Confirm</button>` : ''}
+                  ${r.status === 'Confirmed' ? `<button onclick="updateResStatus('${r.id}','Preparing')" class="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">Mark Preparing</button>` : ''}
+                  ${['Confirmed','Preparing'].includes(r.status) ? `<button onclick="updateResStatus('${r.id}','Ongoing')" class="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700">Release / Ongoing</button>` : ''}
+                  ${r.status === 'Ongoing' ? `<button onclick="openReturnForm('${r.id}')" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700">Mark Returned</button>` : ''}
+                  
+                  ${r.paymentStatus === 'Payment Submitted' ? `
+                    <button onclick="confirmGCashPayment('${r.id}')" class="text-xs bg-sky-600 text-white px-3 py-1.5 rounded-lg hover:bg-sky-700">
+                      <i class="fas fa-check-circle"></i> Confirm DP Received
+                    </button>
+                  ` : ''}
+                  
+                  ${r.paymentStatus !== 'Paid' ? `<button onclick="recordPayment('${r.id}')" class="text-xs bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg hover:bg-emerald-200">Record Payment</button>` : ''}
+                  ${r.status !== 'Cancelled' && r.status !== 'Completed' ? `<button onclick="updateResStatus('${r.id}','Cancelled')" class="text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-200">Cancel</button>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          `}
+        </div>
+      `;
+    }
+
+    function updateResStatus(id, newStatus) {
+      const r = state.reservations.find(x => x.id === id);
+      if (!r) return;
+      r.status = newStatus;
+      saveData();
+      toast(`Reservation ${id} → ${newStatus}`);
+      render();
+    }
+
+    function recordPayment(id) {
+      const r = state.reservations.find(x => x.id === id);
+      if (!r) return;
+      const remaining = r.total - r.paid;
+      const amount = prompt(`Record payment for ${id}\nRemaining: ${money(remaining)}\nEnter amount:`, remaining);
+      if (amount === null) return;
+      const val = parseFloat(amount);
+      if (isNaN(val) || val <= 0) {
+        toast('Invalid amount', 'error');
+        return;
+      }
+      r.paid = Math.min(r.total, r.paid + val);
+      r.paymentStatus = r.paid >= r.total ? 'Paid' : 'Partial';
+      if (!r.paymentMethod) r.paymentMethod = 'Cash';
+      saveData();
+      toast(`Payment recorded: ${money(val)}`);
+      render();
+    }
+
+    function confirmGCashPayment(id) {
+      const r = state.reservations.find(x => x.id === id);
+      if (!r) return;
+      const dpAmount = r.expectedDpAmount || getDownPaymentAmount(r);
+      if (!confirm(`Confirm that you received the down payment of ${money(dpAmount)} via GCash for ${id}?\n\nThis will mark payment as Partial (DP paid). Remaining balance: ${money(r.total - dpAmount)}`)) return;
+      
+      r.paid = Math.min(r.total, (r.paid || 0) + dpAmount);
+      r.paymentStatus = r.paid >= r.total ? 'Paid' : 'Partial';
+      r.paymentMethod = 'GCash';
+      r.proofOfPayment = r.proofOfPayment; // keep proof
+      saveData();
+      toast(`Down payment confirmed! Paid: ${money(r.paid)} • Status → ${r.paymentStatus}`);
+      render();
+    }
+
+    function renderReturns() {
+      const ongoing = state.reservations.filter(r => r.status === 'Ongoing' || r.status === 'Completed');
+      return `
+        <div class="fade-in">
+          <h2 class="text-xl font-bold mb-2">Returns & Condition Tracking</h2>
+          <p class="text-sm text-slate-500 mb-6">Inspect returned items and record any damaged or missing pieces. Extra charges are calculated automatically.</p>
+          ${ongoing.length === 0 ? '<p class="text-slate-500">No active or completed rentals to process.</p>' : `
+            <div class="space-y-4">
+              ${ongoing.map(r => `
+                <div class="bg-white rounded-xl border border-slate-200 p-5">
+                  <div class="flex justify-between items-start mb-3">
+                    <div>
+                      <div class="font-semibold">${r.id} — ${r.customer}</div>
+                      <div class="text-sm text-slate-500">Return due: ${r.returnDate}</div>
+                    </div>
+                    ${statusBadge(r.status)}
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="text-slate-500 text-left">
+                          <th class="pb-2">Item</th>
+                          <th class="pb-2 text-right">Released</th>
+                          <th class="pb-2 text-right">Good Condition</th>
+                          <th class="pb-2 text-right">Damaged</th>
+                          <th class="pb-2 text-right">Missing</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${r.items.map(i => {
+                          const item = state.items.find(x => x.id === i.id);
+                          const ret = r.returnData?.returned?.find(x => x.id === i.id);
+                          return `
+                            <tr>
+                              <td class="py-1.5">${item?.name || 'Item'}</td>
+                              <td class="py-1.5 text-right">${i.qty}</td>
+                              <td class="py-1.5 text-right ${ret ? 'text-emerald-600 font-medium' : 'text-slate-400'}">${ret ? ret.qty : '—'}</td>
+                              <td class="py-1.5 text-right ${ret && ret.damaged > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'}">${ret ? ret.damaged : '—'}</td>
+                              <td class="py-1.5 text-right ${ret && ret.missing > 0 ? 'text-red-600 font-medium' : 'text-slate-400'}">${ret ? ret.missing : '—'}</td>
+                            </tr>
+                          `;
+                        }).join('')}
+                      </tbody>
+                    </table>
+                  </div>
+                  ${r.status === 'Ongoing' ? `
+                    <button onclick="openReturnForm('${r.id}')" class="mt-4 text-sm bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2">
+                      <i class="fas fa-clipboard-check"></i> Inspect & Record Return
+                    </button>
+                  ` : r.returnData ? `
+                    <div class="mt-4 p-3 bg-slate-50 rounded-lg text-sm">
+                      <div class="flex justify-between">
+                        <span class="text-slate-600">Extra charges (damage/missing):</span>
+                        <span class="font-semibold ${r.returnData.extraCharges > 0 ? 'text-red-600' : 'text-emerald-600'}">${money(r.returnData.extraCharges || 0)}</span>
+                      </div>
+                      ${r.returnData.notes ? `<div class="mt-1 text-slate-500">Notes: ${r.returnData.notes}</div>` : ''}
+                    </div>
+                  ` : ''}
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    // Open the inspection form modal
+    function openReturnForm(id) {
+      const r = state.reservations.find(x => x.id === id);
+      if (!r) return;
+
+      const rows = r.items.map(i => {
+        const item = state.items.find(x => x.id === i.id);
+        const fees = getCategoryFees(item?.category);
+        return `
+          <tr data-item-id="${i.id}" data-released="${i.qty}">
+            <td class="py-2 pr-3">
+              <div class="font-medium">${item?.name || 'Item'}</div>
+              <div class="text-xs text-slate-400">${item?.category || 'Other'} · Dmg ${money(fees.damage)} / Miss ${money(fees.missing)}</div>
+            </td>
+            <td class="py-2 text-center text-slate-500">${i.qty}</td>
+            <td class="py-2 text-center">
+              <input type="number" min="0" max="${i.qty}" value="${i.qty}" 
+                class="w-16 border border-slate-300 rounded px-2 py-1 text-sm text-center return-good"
+                oninput="validateReturnRow(this)">
+            </td>
+            <td class="py-2 text-center">
+              <input type="number" min="0" max="${i.qty}" value="0" 
+                class="w-16 border border-slate-300 rounded px-2 py-1 text-sm text-center return-damaged"
+                oninput="validateReturnRow(this)">
+            </td>
+            <td class="py-2 text-center">
+              <input type="number" min="0" max="${i.qty}" value="0" 
+                class="w-16 border border-slate-300 rounded px-2 py-1 text-sm text-center return-missing"
+                oninput="validateReturnRow(this)">
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-1">
+            <h3 class="font-bold text-lg">Inspect Return</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <p class="text-sm text-slate-500 mb-4">${r.id} — ${r.customer}</p>
+
+          <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-slate-500 text-left border-b border-slate-200">
+                  <th class="pb-2">Item</th>
+                  <th class="pb-2 text-center">Released</th>
+                  <th class="pb-2 text-center">Good</th>
+                  <th class="pb-2 text-center">Damaged</th>
+                  <th class="pb-2 text-center">Missing</th>
+                </tr>
+              </thead>
+              <tbody id="return-form-body">
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+
+          <p class="text-xs text-slate-500 mb-3">Good + Damaged + Missing must equal the Released quantity for each item.</p>
+
+          <div class="mb-4">
+            <label class="text-xs font-medium text-slate-500">Notes (optional)</label>
+            <textarea id="return-notes" rows="2" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Any remarks about the condition..."></textarea>
+          </div>
+
+          <div class="bg-slate-50 rounded-lg p-3 mb-4 text-sm">
+            <div class="flex justify-between">
+              <span>Estimated extra charges:</span>
+              <span id="extra-charges-preview" class="font-semibold">₱0</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Fees depend on item category (set in Settings)</p>
+          </div>
+
+          <button onclick="submitReturnForm('${id}')" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700">
+            Save Return Record
+          </button>
+        </div>
+      `);
+
+      // Attach live calculation
+      document.querySelectorAll('#return-form-body input').forEach(inp => {
+        inp.addEventListener('input', updateExtraChargesPreview);
+      });
+      updateExtraChargesPreview();
+    }
+
+    function validateReturnRow(input) {
+      const row = input.closest('tr');
+      const released = parseInt(row.dataset.released) || 0;
+      const goodEl = row.querySelector('.return-good');
+      const damagedEl = row.querySelector('.return-damaged');
+      const missingEl = row.querySelector('.return-missing');
+
+      let good = parseInt(goodEl.value) || 0;
+      let damaged = parseInt(damagedEl.value) || 0;
+      let missing = parseInt(missingEl.value) || 0;
+
+      // Clamp individual values
+      if (good < 0) good = 0;
+      if (damaged < 0) damaged = 0;
+      if (missing < 0) missing = 0;
+      if (damaged > released) damaged = released;
+      if (missing > released) missing = released;
+
+      // When damaged or missing changes, auto-adjust Good so totals match
+      if (input.classList.contains('return-damaged') || input.classList.contains('return-missing')) {
+        good = Math.max(0, released - damaged - missing);
+        goodEl.value = good;
+        damagedEl.value = damaged;
+        missingEl.value = missing;
+      } else {
+        // When Good changes, clamp so total doesn't exceed released
+        const total = good + damaged + missing;
+        if (total > released) {
+          good = Math.max(0, released - damaged - missing);
+          goodEl.value = good;
+        }
+      }
+
+      updateExtraChargesPreview();
+    }
+
+    function updateExtraChargesPreview() {
+      let extra = 0;
+      document.querySelectorAll('#return-form-body tr').forEach(row => {
+        const itemId = parseInt(row.dataset.itemId);
+        const item = state.items.find(i => i.id === itemId);
+        const fees = getCategoryFees(item?.category);
+        const damaged = parseInt(row.querySelector('.return-damaged').value) || 0;
+        const missing = parseInt(row.querySelector('.return-missing').value) || 0;
+        extra += damaged * fees.damage + missing * fees.missing;
+      });
+      const el = document.getElementById('extra-charges-preview');
+      if (el) {
+        el.textContent = money(extra);
+        el.className = extra > 0 ? 'font-semibold text-red-600' : 'font-semibold text-emerald-600';
+      }
+    }
+
+    function submitReturnForm(id) {
+      const r = state.reservations.find(x => x.id === id);
+      if (!r) return;
+
+      const returned = [];
+      let valid = true;
+
+      document.querySelectorAll('#return-form-body tr').forEach(row => {
+        const itemId = parseInt(row.dataset.itemId);
+        const released = parseInt(row.dataset.released);
+        const good = parseInt(row.querySelector('.return-good').value) || 0;
+        const damaged = parseInt(row.querySelector('.return-damaged').value) || 0;
+        const missing = parseInt(row.querySelector('.return-missing').value) || 0;
+
+        if (good + damaged + missing !== released) {
+          valid = false;
+        }
+        returned.push({ id: itemId, qty: good, damaged, missing });
+      });
+
+      if (!valid) {
+        toast('Good + Damaged + Missing must equal Released quantity for every item', 'error');
+        return;
+      }
+
+      const extra = returned.reduce((s, x) => {
+        const item = state.items.find(i => i.id === x.id);
+        const fees = getCategoryFees(item?.category);
+        return s + x.damaged * fees.damage + x.missing * fees.missing;
+      }, 0);
+      const notes = document.getElementById('return-notes')?.value || '';
+
+      r.returnData = { returned, extraCharges: extra, notes };
+      r.status = 'Completed';
+
+      // Update inventory
+      returned.forEach(ret => {
+        const item = state.items.find(i => i.id === ret.id);
+        if (item) {
+          item.available += ret.qty;                    // good items go back to available
+          item.rented = Math.max(0, item.rented - (ret.qty + ret.damaged + ret.missing));
+          item.damaged += ret.damaged;                  // track damaged
+          // missing items are simply lost (total stock effectively reduced)
+          item.total = Math.max(0, item.total - ret.missing);
+        }
+      });
+
+      saveData();
+      closeModal();
+      toast(extra > 0 ? `Return saved. Extra charges: ${money(extra)}` : 'Return saved. All items in good condition.');
+      render();
+    }
+
+    function renderReports() {
+      const byMonth = {};
+      state.reservations.forEach(r => {
+        const m = r.created?.slice(0,7) || '2026-09';
+        byMonth[m] = (byMonth[m] || 0) + (r.paid || 0);
+      });
+      const itemPopularity = {};
+      state.reservations.forEach(r => {
+        r.items.forEach(i => {
+          const item = state.items.find(x => x.id === i.id);
+          const name = item?.name || 'Unknown';
+          itemPopularity[name] = (itemPopularity[name] || 0) + i.qty;
+        });
+      });
+      const sortedItems = Object.entries(itemPopularity).sort((a,b) => b[1] - a[1]);
+
+      const completed = state.reservations.filter(r => r.status === 'Completed').length;
+      const cancelled = state.reservations.filter(r => r.status === 'Cancelled').length;
+      const totalRes = state.reservations.length;
+
+      return `
+        <div class="fade-in space-y-6">
+          <h2 class="text-xl font-bold">Reports & Analytics</h2>
+          <div class="grid md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">Total Reservations</div>
+              <div class="text-2xl font-bold">${totalRes}</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">Completed</div>
+              <div class="text-2xl font-bold text-emerald-600">${completed}</div>
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <div class="text-sm text-slate-500">Cancelled</div>
+              <div class="text-2xl font-bold text-slate-500">${cancelled}</div>
+            </div>
+          </div>
+
+          <div class="grid lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <h3 class="font-semibold mb-4">Most Rented Items</h3>
+              ${sortedItems.length === 0 ? '<p class="text-slate-500 text-sm">No data yet</p>' : `
+                <div class="space-y-3">
+                  ${sortedItems.map(([name, qty], idx) => `
+                    <div class="flex items-center gap-3">
+                      <span class="text-lg">${idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '•'}</span>
+                      <div class="flex-1">
+                        <div class="flex justify-between text-sm">
+                          <span>${name}</span>
+                          <span class="font-medium">${qty} units</span>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+            <div class="bg-white rounded-xl border border-slate-200 p-5">
+              <h3 class="font-semibold mb-4">Revenue by Month</h3>
+              ${Object.keys(byMonth).length === 0 ? '<p class="text-slate-500 text-sm">No data yet</p>' : `
+                <div class="space-y-3">
+                  ${Object.entries(byMonth).map(([m, val]) => `
+                    <div class="flex justify-between text-sm">
+                      <span>${m}</span>
+                      <span class="font-semibold text-emerald-600">${money(val)}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl border border-slate-200 p-5">
+            <h3 class="font-semibold mb-3">Inventory Health</h3>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              ${state.items.map(i => `
+                <div class="border border-slate-100 rounded-lg p-3">
+                  <div class="font-medium text-sm mb-1">${i.name}</div>
+                  <div class="text-xs text-slate-500 space-y-0.5">
+                    <div>Available: <span class="text-emerald-600 font-medium">${i.available}</span></div>
+                    <div>Rented: <span class="text-blue-600 font-medium">${i.rented}</span></div>
+                    <div>Damaged: <span class="text-red-600 font-medium">${i.damaged}</span></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ========== ADMIN: SETTINGS ==========
+    function renderSettings() {
+      return `
+        <div class="fade-in max-w-xl space-y-8">
+          <div>
+            <h2 class="text-xl font-bold mb-1">Settings</h2>
+            <p class="text-sm text-slate-500">Manage payment QR and damage/missing fees.</p>
+          </div>
+
+          <!-- Down Payment % -->
+          <div class="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 class="font-semibold mb-1 flex items-center gap-2">
+              <i class="fas fa-percent text-sky-600"></i> Down Payment
+            </h3>
+            <p class="text-sm text-slate-500 mb-4">GCash online payment is for down payment only. Set the required percentage of the total.</p>
+            <div class="flex items-center gap-3 mb-4">
+              <input type="number" id="fee-dp-percent" min="1" max="100" step="5" value="${state.downPaymentPercent}"
+                class="w-24 border border-slate-300 rounded-lg px-3 py-2 text-sm">
+              <span class="text-sm text-slate-600">% of total amount</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-3">Example: 50% of ₱2,000 = ₱1,000 down payment</p>
+            <button onclick="saveFees()" class="bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-emerald-700">
+              Save Down Payment %
+            </button>
+          </div>
+
+          <!-- Deposit, delivery and admin PIN -->
+          <div class="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 class="font-semibold mb-1">Deposit and Delivery</h3>
+            <p class="text-sm text-slate-500 mb-4">These replace the old fixed 50% deposit and ₱200 delivery fee.</p>
+            <div class="grid sm:grid-cols-2 gap-3 mb-4">
+              <div><label class="text-xs font-medium text-slate-500" for="fee-deposit-pct">Refundable deposit (%)</label>
+                <input type="number" id="fee-deposit-pct" min="0" max="100" value="${state.depositPercent}" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1"></div>
+              <div><label class="text-xs font-medium text-slate-500" for="fee-delivery">Delivery fee (₱)</label>
+                <input type="number" id="fee-delivery" min="0" value="${state.deliveryFee}" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mt-1"></div>
+                          </div>
+            <button onclick="saveFees()" class="bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-emerald-700">Save</button>
+            <button onclick="cloudLogout()" class="ml-2 text-sm text-slate-600 px-3 py-2">Sign out of admin</button>
+            <p class="text-xs text-slate-400 mt-3">Settings, items and bookings sync to your database while you are signed in as admin.</p>
+          </div>
+
+          <!-- Damage & Missing Fees per Category -->
+          <div class="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 class="font-semibold mb-1 flex items-center gap-2">
+              <i class="fas fa-money-bill-wave text-emerald-600"></i> Damage & Missing Fees by Category
+            </h3>
+            <p class="text-sm text-slate-500 mb-4">Create categories here first (e.g. Long Table, Wooden Chair). They will appear in the Inventory category dropdown. Set damage &amp; missing fees for each.</p>
+
+            <div class="space-y-4 mb-4" id="category-fees-list">
+              ${getAllCategories().length === 0 ? `
+                <div class="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg p-4 text-center">
+                  No categories yet. Add one below.
+                </div>
+              ` : ''}
+              ${getAllCategories().map(cat => {
+                const f = state.feesByCategory[cat] || { damage: 200, missing: 500 };
+                return `
+                  <div class="border border-slate-100 rounded-lg p-3">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="font-medium text-sm">${cat}</div>
+                      <button type="button" onclick="removeCategory('${cat.replace(/'/g, "\\'")}')" class="text-xs text-red-500 hover:underline">Remove</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label class="text-xs text-slate-500">Damaged fee</label>
+                        <div class="relative mt-1">
+                          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₱</span>
+                          <input type="number" data-cat="${cat.replace(/"/g, '&quot;')}" data-type="damage" min="0" step="50" value="${f.damage}"
+                            class="fee-cat-input w-full border border-slate-300 rounded-lg pl-7 pr-3 py-2 text-sm">
+                        </div>
+                      </div>
+                      <div>
+                        <label class="text-xs text-slate-500">Missing fee</label>
+                        <div class="relative mt-1">
+                          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">₱</span>
+                          <input type="number" data-cat="${cat.replace(/"/g, '&quot;')}" data-type="missing" min="0" step="50" value="${f.missing}"
+                            class="fee-cat-input w-full border border-slate-300 rounded-lg pl-7 pr-3 py-2 text-sm">
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="flex gap-2 mb-4">
+              <input type="text" id="new-category-name" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="New category name (e.g. Long Table)">
+              <button type="button" onclick="addCategoryFromSettings()" class="bg-slate-100 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-200 whitespace-nowrap">
+                + Add Category
+              </button>
+            </div>
+
+            <button onclick="saveFees()" class="bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-emerald-700">
+              Save Category Fees
+            </button>
+          </div>
+
+          <!-- GCash QR -->
+          <div class="bg-white rounded-xl border border-slate-200 p-6">
+            <h3 class="font-semibold mb-1 flex items-center gap-2">
+              <i class="fas fa-qrcode text-sky-600"></i> GCash QR Code
+            </h3>
+            <p class="text-sm text-slate-500 mb-4">Upload your GCash QR so customers can scan and pay.</p>
+
+            ${state.gcashQR ? `
+              <div class="mb-4">
+                <p class="text-sm font-medium text-slate-600 mb-2">Current QR Code:</p>
+                <img src="${state.gcashQR}" alt="Current GCash QR" class="max-h-64 rounded-lg border border-slate-200 mx-auto">
+              </div>
+              <button onclick="removeGCashQR()" class="text-sm text-red-600 hover:underline mb-4">Remove current QR</button>
+            ` : `
+              <div class="text-center py-6 text-slate-400 mb-4">
+                <i class="fas fa-qrcode text-4xl mb-2"></i>
+                <p class="text-sm">No GCash QR uploaded yet</p>
+              </div>
+            `}
+
+            <div class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center">
+              <input type="file" id="qr-file" accept="image/*" class="hidden" onchange="uploadGCashQR(event)">
+              <label for="qr-file" class="cursor-pointer">
+                <i class="fas fa-cloud-upload-alt text-3xl text-slate-400 mb-2"></i>
+                <p class="text-sm text-slate-600 font-medium">Click to upload GCash QR code</p>
+                <p class="text-xs text-slate-400 mt-1">PNG or JPG, max 3MB</p>
+              </label>
+            </div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+            <strong>Payment flow reminder:</strong>
+            <ol class="list-decimal list-inside mt-2 space-y-1">
+              <li>Upload your GCash QR code above.</li>
+              <li>Customer clicks <strong>Pay with GCash</strong> on their booking.</li>
+              <li>They scan, pay, then upload the receipt.</li>
+              <li>You review the proof + check GCash, then confirm the payment.</li>
+            </ol>
+          </div>
+        </div>
+      `;
+    }
+
+    function saveFees() {
+      const dpEl = document.getElementById('fee-dp-percent');
+      if (dpEl) {
+        const dp = parseFloat(dpEl.value);
+        if (isNaN(dp) || dp < 1 || dp > 100) {
+          toast('Down payment must be between 1 and 100%', 'error');
+          return;
+        }
+        state.downPaymentPercent = dp;
+      }
+
+      const depEl = document.getElementById('fee-deposit-pct');
+      const delEl = document.getElementById('fee-delivery');
+      const pinEl = document.getElementById('admin-pin');
+      if (depEl && delEl) {
+        const dep = parseFloat(depEl.value), del = parseFloat(delEl.value);
+        if (isNaN(dep) || dep < 0 || dep > 100 || isNaN(del) || del < 0) {
+          toast('Deposit must be 0 to 100% and delivery fee 0 or more', 'error');
+          return;
+        }
+        state.depositPercent = dep;
+        state.deliveryFee = del;
+      }
+      if (pinEl && pinEl.value) {
+        if (!/^\d{4,}$/.test(pinEl.value)) { toast('PIN must be 4 or more digits', 'error'); return; }
+        state.adminPin = pinEl.value;
+        state.adminUnlocked = true;
+      }
+
+      // Per-category fees from dynamic inputs
+      document.querySelectorAll('.fee-cat-input').forEach(inp => {
+        const cat = inp.dataset.cat;
+        const type = inp.dataset.type;
+        const val = parseFloat(inp.value);
+        if (!cat || isNaN(val) || val < 0) return;
+        if (!state.feesByCategory[cat]) state.feesByCategory[cat] = { damage: 200, missing: 500 };
+        if (type === 'damage') state.feesByCategory[cat].damage = val;
+        if (type === 'missing') state.feesByCategory[cat].missing = val;
+      });
+
+      saveData();
+      toast('Settings saved');
+      render();
+    }
+
+    function addCategoryFromSettings() {
+      const input = document.getElementById('new-category-name');
+      const name = cleanKey(input?.value);
+      if (!name) {
+        toast('Enter a category name', 'error');
+        return;
+      }
+      if (state.feesByCategory[name]) {
+        toast('Category already exists', 'error');
+        return;
+      }
+      ensureCategory(name);
+      saveData();
+      toast(`Category "${name}" added`);
+      render();
+    }
+
+    function removeCategory(cat) {
+      const inUse = state.items.some(i => i.category === cat);
+      if (inUse) {
+        toast(`Cannot remove "${cat}" — items still use this category`, 'error');
+        return;
+      }
+      if (!confirm(`Remove category "${cat}"?`)) return;
+      delete state.feesByCategory[cat];
+      saveData();
+      toast(`Category "${cat}" removed`);
+      render();
+    }
+
+    function uploadGCashQR(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 3 * 1024 * 1024) {
+        toast('Image too large (max 3MB)', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        state.gcashQR = ev.target.result;
+        saveData();
+        toast('GCash QR code uploaded successfully!');
+        render();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removeGCashQR() {
+      if (!confirm('Remove the current GCash QR code?')) return;
+      state.gcashQR = null;
+      saveData();
+      toast('GCash QR removed');
+      render();
+    }
+
+    // ===================== MAIN RENDER =====================
+    // ===================== MESSAGING =====================
+    function renderMessages() {
+      const isAdmin = state.mode === 'admin';
+      const myRole = isAdmin ? 'admin' : 'client';
+      // Mark messages to me as read when viewing
+      state.messages.forEach(m => {
+        if (m.to === myRole) m.read = true;
+      });
+      saveData();
+
+      const sorted = [...state.messages].sort((a, b) => new Date(a.time) - new Date(b.time));
+
+      return `
+        <div class="fade-in max-w-2xl mx-auto">
+          <h2 class="text-xl font-bold mb-2">Messages</h2>
+          <p class="text-sm text-slate-500 mb-4">${isAdmin ? 'Chat with customers. They can ask about full payment, schedule, etc.' : 'Message the admin — e.g. if you want to pay the full amount via GCash.'}</p>
+
+          <div class="bg-white rounded-xl border border-slate-200 flex flex-col" style="height: 420px;">
+            <div id="msg-list" class="flex-1 overflow-y-auto p-4 space-y-3">
+              ${sorted.length === 0 ? `
+                <div class="text-center text-slate-400 text-sm py-10">No messages yet. Start the conversation below.</div>
+              ` : sorted.map(m => {
+                const mine = m.from === myRole;
+                return `
+                  <div class="flex ${mine ? 'justify-end' : 'justify-start'}">
+                    <div class="max-w-[80%] rounded-2xl px-4 py-2 text-sm ${mine ? 'bg-emerald-600 text-white rounded-br-md' : 'bg-slate-100 text-slate-800 rounded-bl-md'}">
+                      ${m.reservationId ? `<div class="text-xs opacity-70 mb-0.5">${m.reservationId}</div>` : ''}
+                      <div>${escapeHtml(m.text)}</div>
+                      <div class="text-xs opacity-60 mt-1">${formatMsgTime(m.time)}</div>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            <div class="border-t border-slate-200 p-3">
+              <form onsubmit="sendMessage(event)" class="flex gap-2">
+                <input name="text" required placeholder="Type a message..." class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" autocomplete="off">
+                <button type="submit" class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Text typed by people is stored escaped so it can never run as code
+    function clean(v) {
+      return String(v == null ? '' : v).trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    // Category names are also used inside onclick handlers, so quotes and slashes are removed
+    function cleanKey(v) {
+      return String(v == null ? '' : v).replace(/[<>&"'`\\]/g,'').trim();
+    }
+
+    function formatMsgTime(iso) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch { return ''; }
+    }
+
+    function sendMessage(e, reservationId) {
+      e.preventDefault();
+      const form = e.target;
+      const text = (form.text?.value || form.querySelector('[name=text]')?.value || '').trim();
+      if (!text) return;
+
+      const isAdmin = state.mode === 'admin';
+      state.messages.push({
+        id: Date.now(),
+        from: isAdmin ? 'admin' : 'client',
+        to: isAdmin ? 'client' : 'admin',
+        text,
+        reservationId: reservationId || null,
+        time: new Date().toISOString(),
+        read: false
+      });
+      saveData();
+      if (form.text) form.text.value = '';
+      else if (form.querySelector('[name=text]')) form.querySelector('[name=text]').value = '';
+      toast('Message sent');
+      if (state.view === 'messages') {
+        render();
+        // scroll to bottom
+        setTimeout(() => {
+          const list = document.getElementById('msg-list');
+          if (list) list.scrollTop = list.scrollHeight;
+        }, 50);
+      } else {
+        closeModal();
+      }
+    }
+
+    function openMessageModal(reservationId) {
+      openModal(`
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-bold text-lg">Message Admin</h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+          </div>
+          <p class="text-sm text-slate-500 mb-3">About reservation: <strong>${reservationId || 'General'}</strong></p>
+          <p class="text-xs text-slate-400 mb-3">Example: "Hi, I want to pay the full amount via GCash for this booking."</p>
+          <form onsubmit="sendMessage(event, '${reservationId || ''}')">
+            <textarea name="text" required rows="3" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-3" placeholder="Type your message..."></textarea>
+            <button type="submit" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700">Send Message</button>
+          </form>
+        </div>
+      `);
+    }
+
+    function render() {
+      renderNav();
+      const main = document.getElementById('main-content');
+      let html = '';
+      if (state.mode === 'client') {
+        if (state.view === 'home') html = renderHome();
+        else if (state.view === 'catalog') html = renderCatalog();
+        else if (state.view === 'cart') html = renderCart();
+        else if (state.view === 'bookings') html = renderBookings();
+        else if (state.view === 'messages') html = renderMessages();
+        else html = renderHome();
+      } else {
+        if (state.view === 'dashboard') html = renderDashboard();
+        else if (state.view === 'inventory') html = renderInventory();
+        else if (state.view === 'reservations') html = renderReservations();
+        else if (state.view === 'returns') html = renderReturns();
+        else if (state.view === 'messages') html = renderMessages();
+        else if (state.view === 'reports') html = renderReports();
+        else if (state.view === 'settings') html = renderSettings();
+        else html = renderDashboard();
+      }
+      main.innerHTML = html;
+      if (state.view === 'messages') {
+        setTimeout(() => {
+          const list = document.getElementById('msg-list');
+          if (list) list.scrollTop = list.scrollHeight;
+        }, 50);
+      }
+    }
+
+
+    // ===================== CLOUD SYNC (Supabase) =====================
+    const CLOUD = { url: 'https://oihjmyjmuzepsenczgdu.supabase.co', key: 'sb_publishable_Qu-zBsGs4T1CTob3pU5z1w_GDvSkTM2' };
+    let session = null;
+    try { session = JSON.parse(localStorage.getItem('rentease_session') || 'null'); } catch (e) { session = null; }
+    let syncTimer = null, syncing = false;
+    const sentHash = {};
+    let sentIds = {};
+    try { sentIds = JSON.parse(localStorage.getItem('rentease_sent_ids') || '{}'); } catch (e) { sentIds = {}; }
+    const isAdminCloud = () => !!(session && session.access_token);
+    const hash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h); };
+    const shopData = () => ({ feesByCategory: state.feesByCategory, downPaymentPercent: state.downPaymentPercent, depositPercent: state.depositPercent, deliveryFee: state.deliveryFee, gcashQR: state.gcashQR });
+    const stateHash = () => hash(JSON.stringify([state.items, state.reservations, state.messages, shopData()]));
+
+    function setSession(d) {
+      session = d ? { access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at || (Math.floor(Date.now() / 1000) + (d.expires_in || 3600)) } : null;
+      try { if (session) localStorage.setItem('rentease_session', JSON.stringify(session)); else localStorage.removeItem('rentease_session'); } catch (e) {}
+    }
+    async function authCall(grant, body) {
+      const r = await fetch(CLOUD.url + '/auth/v1/token?grant_type=' + grant, { method: 'POST', headers: { apikey: CLOUD.key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error('auth ' + r.status);
+      return r.json();
+    }
+    async function ensureFresh() {
+      if (!session || session.expires_at * 1000 - Date.now() > 60000) return;
+      try { setSession(await authCall('refresh_token', { refresh_token: session.refresh_token })); }
+      catch (e) { if (/auth 4/.test(e.message)) setSession(null); }
+    }
+    async function api(path, opts = {}) {
+      await ensureFresh();
+      const headers = { apikey: CLOUD.key, 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (session) headers.Authorization = 'Bearer ' + session.access_token;
+      const r = await fetch(CLOUD.url + path, { ...opts, headers });
+      if (!r.ok) throw new Error(path + ' ' + r.status);
+      const t = await r.text();
+      return t ? JSON.parse(t) : null;
+    }
+
+    async function cloudPull() {
+      const admin = isAdminCloud();
+      const reqs = [api('/rest/v1/items?select=id,data'), api('/rest/v1/settings?select=value&key=eq.shop')];
+      if (admin) reqs.push(api('/rest/v1/reservations?select=id,data&order=updated_at.desc'), api('/rest/v1/messages?select=id,data&order=updated_at.asc'));
+      const [items, shop, res, msgs] = await Promise.all(reqs);
+
+      if (!(admin && !items.length && state.items.length)) state.items = items.map(r => r.data);
+      items.forEach(r => { sentHash['items:' + r.id] = JSON.stringify(r.data); });
+      sentHash.itemIds = items.map(r => String(r.id));
+
+      if (shop.length) {
+        const v = shop[0].value || {};
+        sentHash.shop = JSON.stringify(v);
+        state.feesByCategory = v.feesByCategory || {};
+        state.downPaymentPercent = v.downPaymentPercent ?? 50;
+        state.depositPercent = v.depositPercent ?? 50;
+        state.deliveryFee = v.deliveryFee ?? 200;
+        state.gcashQR = v.gcashQR ?? null;
+      }
+
+      if (admin) {
+        const base = new Map(), revs = [];
+        res.forEach(r => {
+          if (String(r.id).includes('~')) revs.push(r);
+          else { base.set(String(r.id), r.data); sentHash['reservations:' + r.id] = JSON.stringify(r.data); }
+        });
+        // Customers send payment proof as a separate row; only these two fields are accepted
+        const applied = [];
+        revs.sort((a, b) => a.id.localeCompare(b.id)).forEach(r => {
+          const b = base.get(r.id.split('~')[0]);
+          if (!b) return;
+          ['proofOfPayment', 'paymentMethod'].forEach(k => { if (r.data[k] != null) b[k] = r.data[k]; });
+          applied.push(r.id);
+        });
+        const localOnly = state.reservations.filter(r => !base.has(String(r.id)));
+        state.reservations = [...localOnly, ...base.values()];
+        if (applied.length) {
+          await api('/rest/v1/reservations?id=in.(' + encodeURIComponent(applied.map(i => '"' + i + '"').join(',')) + ')', { method: 'DELETE' });
+        }
+        const have = new Map(msgs.map(r => [String(r.id), r.data]));
+        msgs.forEach(r => { sentHash['messages:' + r.id] = JSON.stringify(r.data); });
+        state.messages = [...have.values(), ...state.messages.filter(m => !have.has(String(m.id)))].sort((a, b) => String(a.time).localeCompare(String(b.time)));
+      }
+    }
+
+    function scheduleSync() {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => { syncTimer = null; cloudPush(); }, 1200);
+    }
+
+    async function cloudPush() {
+      if (syncing) { scheduleSync(); return; }
+      syncing = true;
+      try {
+        const admin = isAdminCloud();
+        const prefer = { Prefer: (admin ? 'resolution=merge-duplicates' : 'resolution=ignore-duplicates') + ',return=minimal' };
+        const post = (t, rows) => api('/rest/v1/' + t + '?on_conflict=' + (t === 'settings' ? 'key' : 'id'), { method: 'POST', headers: prefer, body: JSON.stringify(rows) });
+
+        if (admin && sentHash.itemIds) {
+          const gone = sentHash.itemIds.filter(id => !state.items.some(i => String(i.id) === id));
+          if (gone.length) await api('/rest/v1/items?id=in.(' + encodeURIComponent(gone.map(g => '"' + g + '"').join(',')) + ')', { method: 'DELETE' });
+        }
+
+        const jobs = admin
+          ? { items: state.items, reservations: state.reservations, messages: state.messages }
+          : { reservations: state.reservations, messages: state.messages.filter(m => m.from === 'client') };
+        for (const t in jobs) {
+          for (const o of jobs[t]) {
+            const id = String(o.id), j = JSON.stringify(o), k = t + ':' + id;
+            if (admin) {
+              if (sentHash[k] === j) continue;
+              await post(t, [{ id, data: o }]);
+              sentHash[k] = j;
+            } else {
+              const h = t === 'reservations' ? hash(JSON.stringify([o.proofOfPayment, o.paymentMethod])) : '1';
+              if (sentIds[k] === h) continue;
+              const row = !sentIds[k] ? { id, data: o } : { id: id + '~' + Date.now(), data: { proofOfPayment: o.proofOfPayment, paymentMethod: o.paymentMethod } };
+              await post(t, [row]);
+              sentIds[k] = h;
+              try { localStorage.setItem('rentease_sent_ids', JSON.stringify(sentIds)); } catch (e) {}
+            }
+          }
+        }
+        if (admin) {
+          sentHash.itemIds = state.items.map(i => String(i.id));
+          const sj = JSON.stringify(shopData());
+          if (sentHash.shop !== sj) { await post('settings', [{ key: 'shop', value: shopData() }]); sentHash.shop = sj; }
+        }
+      } catch (e) {
+        console.warn('sync failed', e);
+        if (isAdminCloud()) toast('Sync failed. Will retry shortly.', 'error');
+      } finally { syncing = false; }
+    }
+
+    async function cloudTick() {
+      if (syncTimer || syncing) return;
+      const a = document.activeElement;
+      if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+      try {
+        await cloudPush();
+        const before = stateHash();
+        await cloudPull();
+        if (before !== stateHash()) { saveDataRawSafe(); render(); }
+      } catch (e) { console.warn('pull failed', e); }
+    }
+    function saveDataRawSafe() { try { saveDataRaw(); } catch (e) {} }
+
+    function openLoginModal() {
+      openModal(`
+        <form onsubmit="doLogin(event)" class="p-6">
+          <h3 class="font-bold text-lg mb-3">Admin sign in</h3>
+          <label class="text-xs font-medium text-slate-500" for="adm-email">Email</label>
+          <input id="adm-email" name="email" type="email" autocomplete="username" required class="w-full border border-slate-300 rounded-lg px-3 py-2 mb-3">
+          <label class="text-xs font-medium text-slate-500" for="adm-pass">Password</label>
+          <input id="adm-pass" name="password" type="password" autocomplete="current-password" required class="w-full border border-slate-300 rounded-lg px-3 py-2 mb-3">
+          <button type="submit" class="w-full bg-emerald-600 text-white font-semibold py-2.5 rounded-lg hover:bg-emerald-700">Sign in</button>
+        </form>`);
+    }
+    async function doLogin(e) {
+      e.preventDefault();
+      const f = e.target;
+      try {
+        setSession(await authCall('password', { email: f.email.value.trim(), password: f.password.value }));
+        closeModal();
+        try { await cloudPull(); } catch (err) { console.warn(err); }
+        saveDataRawSafe();
+        switchMode('admin');
+        scheduleSync();
+      } catch (err) {
+        toast('Wrong email or password', 'error');
+      }
+    }
+    function cloudLogout() {
+      setSession(null);
+      switchMode('client');
+      toast('Signed out');
+    }
+
+    // Init
+    loadData();
+    render();
+    cloudTick();
+    setInterval(cloudTick, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) cloudTick(); });
+  </script>
+</body>
+</html>
